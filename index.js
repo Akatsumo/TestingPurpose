@@ -10,7 +10,7 @@ const bot = new Telegraf(configs.BOT_TOKEN);
 
 
 
-
+const OWNER_ID = 8462359928;
 
 
 
