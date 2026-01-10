@@ -1,60 +1,73 @@
-const { Telegraf } = require('telegraf');
-const path = require('path');
+const { Telegraf } = require("telegraf");
 const fs = require("fs");
-const configs = require('./config');
 const { exec, execSync } = require("child_process");
 require("dotenv").config();
-
+const configs = require("./config");
 
 const bot = new Telegraf(configs.BOT_TOKEN);
+const OWNER_ID = 8462359928; // Change to your Telegram ID
 
+// ---------------- Helper: Check owner ----------------
+function isOwner(ctx) {
+    return ctx.from && ctx.from.id === OWNER_ID;
+}
 
-
-const OWNER_ID = 8462359928;
-
-
-bot.command("start", async (ctx) => {
-     await ctx.reply("testing....")
-})
-// Helper: Edit or Reply
+// ---------------- Helper: Reply or edit ----------------
 async function editOrReply(ctx, text, extra = {}) {
-    if (ctx.message?.from.id === OWNER_ID) {
+    if (isOwner(ctx)) {
         await ctx.reply(text, extra);
     } else {
         await ctx.reply("❌ You are not allowed.");
     }
 }
 
-// ================== /eval command ==================
+// ---------------- /start command ----------------
+bot.command("start", async (ctx) => {
+    await ctx.reply("🤖 Bot is running! Use /eval, /sh, /update commands.");
+});
+
+// ---------------- /eval command ----------------
 bot.command("eval", async (ctx) => {
-    if (ctx.from.id !== OWNER_ID) return;
+    if (!isOwner(ctx)) return;
 
-    const cmd = ctx.message.text.split(" ").slice(1).join(" ");
-    if (!cmd) return editOrReply(ctx, "<b>No command given!</b>");
+    const code = ctx.message.text.split(" ").slice(1).join(" ");
+    if (!code) return editOrReply(ctx, "<b>No code provided!</b>");
 
-    let result = "";
+    let output = "";
+
     try {
-        // Evaluate JS code dynamically
-        const asyncEval = async () => eval(cmd);
-        const output = await asyncEval();
-        result = output === undefined ? "success" : String(output);
+        // Capture console.log inside eval
+        let logs = [];
+        const log = console.log;
+        console.log = (...args) => logs.push(args.join(" "));
+
+        // Async eval
+        const asyncEval = async () => eval(code);
+        const result = await asyncEval();
+
+        console.log = log; // restore console.log
+
+        output = logs.join("\n");
+        if (result !== undefined) output += (output ? "\n" : "") + String(result);
+        if (!output) output = "success";
     } catch (err) {
-        result = err.stack || String(err);
+        output = err.stack || String(err);
     }
 
-    if (result.length > 4000) {
-        const filename = "output.txt";
-        fs.writeFileSync(filename, result, "utf8");
-        await ctx.replyWithDocument({ source: filename }, { caption: "<b>Eval Result</b>" });
+    // If output too long, send as document
+    if (output.length > 4000) {
+        const filename = "eval_output.txt";
+        fs.writeFileSync(filename, output, "utf8");
+        await ctx.replyWithDocument({ source: filename }, { caption: "<b>Eval Result</b>", parse_mode: "HTML" });
         fs.unlinkSync(filename);
     } else {
-        await ctx.reply(`<b>📕 Result :</b>\n<pre>${result}</pre>`, { parse_mode: "HTML" });
+        await ctx.reply(`<b>📕 Eval Result:</b>\n<pre>${output}</pre>`, { parse_mode: "HTML" });
     }
 });
 
-// ================== /sh command ==================
+// ---------------- /sh command ----------------
 bot.command("sh", async (ctx) => {
-    if (ctx.from.id !== OWNER_ID) return;
+    if (!isOwner(ctx)) return;
 
     const cmd = ctx.message.text.split(" ").slice(1).join(" ");
     if (!cmd) return editOrReply(ctx, "<b>Example: /sh git pull</b>");
@@ -64,44 +77,42 @@ bot.command("sh", async (ctx) => {
         if (!output) output = "success";
 
         if (output.length > 4000) {
-            const filename = "output.txt";
+            const filename = "shell_output.txt";
             fs.writeFileSync(filename, output, "utf8");
-            await ctx.replyWithDocument({ source: filename }, { caption: `<code>Shell Output</code>` });
+            await ctx.replyWithDocument({ source: filename }, { caption: "<b>Shell Output</b>", parse_mode: "HTML" });
             fs.unlinkSync(filename);
         } else {
-            await ctx.reply(`<b>OUTPUT :</b>\n<pre>${output}</pre>`, { parse_mode: "HTML" });
+            await ctx.reply(`<b>💻 Shell Output:</b>\n<pre>${output}</pre>`, { parse_mode: "HTML" });
         }
     });
 });
 
-// ================== /update command ==================
+// ---------------- /update command ----------------
 bot.command("update", async (ctx) => {
-    if (ctx.from.id !== OWNER_ID) return;
+    if (!isOwner(ctx)) return;
 
-    const msg = await ctx.reply("Pulling latest changes...");
+    const msg = await ctx.reply("🔄 Pulling latest changes...");
     try {
         execSync("git pull");
-        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, "Changes pulled! Restarting bot...");
-        // Restart bot
-        execSync(`pm2 restart ${process.env.PM2_NAME || 'bot'}`); // or node restart
+        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, "✅ Changes pulled! Restarting bot...");
+
+        // Restart bot with pm2 or fallback to node
+        const pm2Name = process.env.PM2_NAME || "bot";
+        try {
+            execSync(`pm2 restart ${pm2Name}`);
+        } catch {
+            execSync(`node index.js`);
+        }
     } catch (err) {
-        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `Error: ${err.message}`);
+        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `<b>Error:</b>\n<pre>${err.message}</pre>`, { parse_mode: "HTML" });
     }
 });
 
+// ---------------- Launch bot ----------------
+bot.launch()
+    .then(() => console.log("✅ Bot is running..."))
+    .catch(err => console.error("❌ Failed to launch bot:", err));
 
-
-// --------- Start-QuizBot ---------- //
-
-bot.launch().then(() => {
-  console.log('QuizBot is running...');
-}).catch((err) => {
-  console.error('Failed to launch QuizBot:', err);
-});
-
-
+// ---------------- Graceful shutdown ----------------
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
-
-
-
