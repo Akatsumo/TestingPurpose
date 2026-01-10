@@ -13,7 +13,9 @@ const bot = new Telegraf(configs.BOT_TOKEN);
 const OWNER_ID = 8462359928;
 
 
-
+bot.command("start", async (ctx) => {
+     await ctx.reply("testing....")
+})
 // Helper: Edit or Reply
 async function editOrReply(ctx, text, extra = {}) {
     if (ctx.message?.from.id === OWNER_ID) {
