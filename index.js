@@ -6,7 +6,7 @@ const { exec, execSync } = require("child_process");
 require("dotenv").config();
 
 
-const bot = new Telegraf(config.BOT_TOKEN);
+const bot = new Telegraf(configs.BOT_TOKEN);
 
 
 
