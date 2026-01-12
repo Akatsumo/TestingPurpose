@@ -2,111 +2,84 @@ const { Telegraf } = require("telegraf");
 const fs = require("fs");
 const { exec, execSync } = require("child_process");
 require("dotenv").config();
+const path = require("path");
 const configs = require("./config");
 
 const bot = new Telegraf(configs.BOT_TOKEN);
-const OWNER_ID = 8462359928; // Change to your Telegram ID
+const OWNER_ID = 8462359928; 
 
-// ---------------- Helper: Check owner ----------------
-function isOwner(ctx) {
-    return ctx.from && ctx.from.id === OWNER_ID;
-}
+const { TelegramClient } = require("telegram");
+const { StringSession } = require("telegram/sessions");
 
-// ---------------- Helper: Reply or edit ----------------
-async function editOrReply(ctx, text, extra = {}) {
-    if (isOwner(ctx)) {
-        await ctx.reply(text, extra);
-    } else {
-        await ctx.reply("❌ You are not allowed.");
-    }
-}
+const apiId = 26850449;
+const apiHash = "72a730c380e68095a8549ad7341b0608";
 
-// ---------------- /start command ----------------
-bot.command("start", async (ctx) => {
-    await ctx.reply("🤖 Bot is running! Use /eval, /sh, /update commands.");
-});
+const client = new TelegramClient(
+  new StringSession(""),
+  apiId,
+  apiHash,
+  { connectionRetries: 5 }
+);
 
-// ---------------- /eval command ----------------
-bot.command("eval", async (ctx) => {
-    if (!isOwner(ctx)) return;
 
-    const code = ctx.message.text.split(" ").slice(1).join(" ");
-    if (!code) return editOrReply(ctx, "<b>No code provided!</b>");
 
-    let output = "";
 
-    try {
-        // Capture console.log inside eval
-        let logs = [];
-        const log = console.log;
-        console.log = (...args) => logs.push(args.join(" "));
 
-        // Async eval
-        const asyncEval = async () => eval(code);
-        const result = await asyncEval();
 
-        console.log = log; // restore console.log
+bot.command("get", async (ctx) => {
+  try {
+    const reply = ctx.message.reply_to_message;
+    if (!reply)
+      return ctx.reply("❌ Kisi media par reply karke /get likho");
 
-        output = logs.join("\n");
-        if (result !== undefined) output += (output ? "\n" : "") + String(result);
-        if (!output) output = "success";
-    } catch (err) {
-        output = err.stack || String(err);
-    }
+    await ctx.reply("⏬ Downloading...");
 
-    // If output too long, send as document
-    if (output.length > 4000) {
-        const filename = "eval_output.txt";
-        fs.writeFileSync(filename, output, "utf8");
-        await ctx.replyWithDocument({ source: filename }, { caption: "<b>Eval Result</b>", parse_mode: "HTML" });
-        fs.unlinkSync(filename);
-    } else {
-        await ctx.reply(`<b>📕 Eval Result:</b>\n<pre>${output}</pre>`, { parse_mode: "HTML" });
-    }
-});
+    // Chat info
+    const chatId = reply.chat.id;
+    const msgId = reply.message_id;
 
-// ---------------- /sh command ----------------
-bot.command("sh", async (ctx) => {
-    if (!isOwner(ctx)) return;
-
-    const cmd = ctx.message.text.split(" ").slice(1).join(" ");
-    if (!cmd) return editOrReply(ctx, "<b>Example: /sh git pull</b>");
-
-    exec(cmd, { shell: true }, async (error, stdout, stderr) => {
-        let output = stdout + stderr;
-        if (!output) output = "success";
-
-        if (output.length > 4000) {
-            const filename = "shell_output.txt";
-            fs.writeFileSync(filename, output, "utf8");
-            await ctx.replyWithDocument({ source: filename }, { caption: "<b>Shell Output</b>", parse_mode: "HTML" });
-            fs.unlinkSync(filename);
-        } else {
-            await ctx.reply(`<b>💻 Shell Output:</b>\n<pre>${output}</pre>`, { parse_mode: "HTML" });
-        }
+    // GramJS fetch
+    const msgs = await gramClient.getMessages(chatId, {
+      ids: msgId
     });
-});
 
-// ---------------- /update command ----------------
-bot.command("update", async (ctx) => {
-    if (!isOwner(ctx)) return;
+    const msg = msgs[0];
+    if (!msg.media)
+      return ctx.reply("❌ Is message me media nahi hai");
 
-    const msg = await ctx.reply("🔄 Pulling latest changes...");
-    try {
-        execSync("git pull");
-        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, "✅ Changes pulled! Restarting bot...");
+    const filePath = path.join(__dirname, `media_${Date.now()}`);
 
-        // Restart bot with pm2 or fallback to node
-        const pm2Name = process.env.PM2_NAME || "bot";
-        try {
-            execSync(`pm2 restart ${pm2Name}`);
-        } catch {
-            execSync(`node index.js`);
-        }
-    } catch (err) {
-        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `<b>Error:</b>\n<pre>${err.message}</pre>`, { parse_mode: "HTML" });
+    await gramClient.downloadMedia(msg, {
+      file: filePath
+    });
+
+    // Auto-detect media type
+    if (msg.photo) {
+      await ctx.replyWithPhoto({ source: filePath });
+    } else if (msg.video) {
+      await ctx.replyWithVideo({ source: filePath });
+    } else if (msg.document) {
+      await ctx.replyWithDocument({ source: filePath });
+    } else if (msg.audio) {
+      await ctx.replyWithAudio({ source: filePath });
+    } else {
+      await ctx.replyWithDocument({ source: filePath });
     }
+
+    fs.unlinkSync(filePath); // cleanup
+
+  } catch (e) {
+    console.error(e);
+    ctx.reply("❌ Download failed");
+  }
 });
+
+
+
+(async () => {
+  await client.start({ botAuthToken: configs.BOT_TOKEN });
+  console.log("✅ GramJS connected");
+})();
 
 // ---------------- Launch bot ----------------
 bot.launch()
