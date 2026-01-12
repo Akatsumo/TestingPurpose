@@ -1,14 +1,15 @@
 {
   "name": "Just-Testing",
   "version": "1.0.0",
-  "description": "A Telegram bot using Telegraf",
+  "description": "A Telegram bot using Telegraf + GramJS",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "telegraf": "^4.16.3",
     "dotenv": "^16.3.1",
-    "axios": "^1.7.5"
+    "axios": "^1.7.5",
+    "telegram": "^2.26.8"
   },
   "author": "Anonymous",
   "license": "GNU"
